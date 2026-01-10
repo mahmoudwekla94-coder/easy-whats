@@ -209,7 +209,7 @@ module.exports = async function webhook(req, res) {
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: "first_utillty",
+      template_name: "1_st",
       template_language: "ar",
 
       // {{1}}
