@@ -259,4 +259,21 @@ module.exports = async function webhook(req, res) {
       return res.status(500).json({
         error: "saas_error",
         details: responseData,
-        debug_p_
+        debug_phone: { input: customerPhone, e164Phone, digitsPhone },
+      });
+    }
+
+    console.log("✅ Success:", responseData);
+    return res.status(200).json({
+      status: "sent",
+      data: responseData,
+    });
+
+  } catch (err) {
+    console.error("❌ Webhook Crash:", err);
+    return res.status(500).json({
+      error: "internal_error",
+      details: err?.message || String(err),
+    });
+  }
+};
