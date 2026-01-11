@@ -19,7 +19,7 @@ module.exports = async function webhook(req, res) {
     // Helpers
     // =========================
     const safeText = (t) => {
-      if (!t) return "";
+      if (!t && t !== 0) return "";
       return String(t)
         .replace(/[\r\n\t]+/g, " ")
         .replace(/\s{2,}/g, " ")
@@ -27,54 +27,66 @@ module.exports = async function webhook(req, res) {
     };
 
     // =========================
+    // Store Tag Routing (EQ / BZ / GZ)
+    // =========================
+    const storeTagRaw =
+      (req.query && req.query.storeTag) ||
+      data.storeTag ||
+      data.tag ||
+      "EQ";
+
+    const storeTag = String(storeTagRaw).toUpperCase();
+
+    // Config لكل Store (نفس SaaS بس تقدر تغير تمبلت)
+    const storeConfig = {
+      EQ: {
+        template: "ordar_confirmation_eq",
+        lang: "ar_EG",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      BZ: {
+        template: "ordar_confirmation_bz",
+        lang: "ar_EG",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      GZ: {
+        template: "ordar_confirmation_gz",
+        lang: "ar_EG",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+    };
+
+    const cfg = storeConfig[storeTag] || storeConfig.EQ;
+
+    // =========================
     // Normalize Phone (Arabic Countries - E.164)
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
-
       let raw = String(phone).replace(/[^0-9]/g, "");
 
-      // لو جاي بكود دولة بالفعل (بدون +)
       const knownCodes = [
-        "966", "971", "20", "249", "967", "962", "965", "974", "973", "968",
-        "964", "212", "213", "216", "218", "970", "961", "963", "222"
+        "966","971","20","249","967","962","965","974","973","968",
+        "964","212","213","216","218","970","961","963","222"
       ];
 
       for (const code of knownCodes) {
-        if (raw.startsWith(code)) {
-          return `+${raw}`;
-        }
+        if (raw.startsWith(code)) return `+${raw}`;
       }
 
-      // ===== أرقام محلية بدون مفتاح =====
+      if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
+      if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
-      // مصر: 01xxxxxxxxx -> +20 1xxxxxxxxx
-      if (raw.startsWith("01") && raw.length === 11) {
-        return `+20${raw.substring(1)}`;
-      }
-
-      // السودان: 09xxxxxxxx -> +249 9xxxxxxxx
-      if (raw.startsWith("09") && raw.length === 10) {
-        return `+249${raw.substring(1)}`;
-      }
-
-      // اليمن: 07xxxxxxx (9 أرقام) -> +967 7xxxxxxx
-      if (raw.startsWith("07") && raw.length === 9) {
-        return `+967${raw.substring(1)}`;
-      }
-
-      // الأردن: 07xxxxxxxx (10 أرقام) -> +962 7xxxxxxxx
-      if (raw.startsWith("07") && raw.length === 10) {
-        return `+962${raw.substring(1)}`;
-      }
-
-      // السعودية / الإمارات: 05xxxxxxxx (10 أرقام)
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
-        return `+966${raw.substring(1)}`; // Default KSA
+        return `+966${raw.substring(1)}`;
       }
 
-      // fallback
       return raw ? `+${raw}` : "";
     }
 
@@ -102,13 +114,14 @@ module.exports = async function webhook(req, res) {
     const country =
       data.country ||
       data.shipping_country ||
+      cfg.defaultCountry ||
       "KSA";
 
     // =========================
     // رقم الهاتف
     // =========================
-    const e164Phone = normalizePhone(customerPhone, country); // +2010...
-    const digitsPhone = e164Phone.replace(/^\+/, "");         // 2010...
+    const e164Phone = normalizePhone(customerPhone, country);
+    const digitsPhone = e164Phone.replace(/^\+/, "");
 
     if (!digitsPhone || digitsPhone.length < 9) {
       return res.status(400).json({
@@ -124,7 +137,8 @@ module.exports = async function webhook(req, res) {
     // =========================
     const firstItem = data.cart_items?.[0] || {};
     const productName = firstItem.product?.name || "منتج";
-    const quantity = firstItem.quantity != null ? firstItem.quantity : 1;
+    const quantity =
+      firstItem.quantity != null ? firstItem.quantity : 1;
 
     const priceRaw =
       firstItem.price ??
@@ -144,25 +158,18 @@ module.exports = async function webhook(req, res) {
       data.delivery ??
       0;
 
-    const priceNum =
-      Number(String(priceRaw).replace(/[^0-9.]/g, "")) || 0;
+    const priceNum = Number(String(priceRaw).replace(/[^0-9.]/g, "")) || 0;
+    const shippingNum = Number(String(shippingRaw).replace(/[^0-9.]/g, "")) || 0;
 
-    const shippingNum =
-      Number(String(shippingRaw).replace(/[^0-9.]/g, "")) || 0;
+    const currencyLabel = cfg.currency;
 
-    const shippingText =
-      shippingNum > 0 ? `${shippingNum} ريال سعودي` : "مجاني";
-
-    const totalNum =
-      shippingNum > 0 ? priceNum + shippingNum : priceNum;
-
-    const priceText =
-      priceNum > 0 ? `${priceNum} ريال سعودي` : "غير محدد";
-
-    const totalText = `${totalNum} ريال سعودي`;
+    const shippingText = shippingNum > 0 ? `${shippingNum} ${currencyLabel}` : "مجاني";
+    const totalNum = shippingNum > 0 ? priceNum + shippingNum : priceNum;
+    const priceText = priceNum > 0 ? `${priceNum} ${currencyLabel}` : "غير محدد";
+    const totalText = `${totalNum} ${currencyLabel}`;
 
     // =========================
-    // العنوان التفصيلي + العنوان الوطني
+    // العنوان التفصيلي + الوطني
     // =========================
     const detailedAddress =
       data.address ||
@@ -179,12 +186,9 @@ module.exports = async function webhook(req, res) {
       data.address_short ||
       "";
 
-    const nationalAddressClean = String(nationalAddressRaw).trim();
-
     const nationalAddress =
-      nationalAddressClean
-        ? nationalAddressClean
-        : "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
+      String(nationalAddressRaw).trim() ||
+      "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
     // =========================
     // ENV
@@ -198,38 +202,21 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // Payload WhatsApp (مطابق لـ {{1}} → {{9}})
+    // Payload WhatsApp
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: "ordar_confirmation",   // عدّل الاسم لو مختلف في المنصة
-      template_language: "ar_EG",
+      template_name: cfg.template,
+      template_language: cfg.lang,
 
-      // {{1}} اسم العميل
       field_1: safeText(customerName),
-
-      // {{2}} رقم الطلب
-      field_2: safeText(orderId),
-
-      // {{3}} اسم المنتج
+      field_2: safeText(`${orderId} (${storeTag})`),   // ⬅️ هنا ضفنا الـ EQ/BZ/GZ
       field_3: safeText(productName),
-
-      // {{4}} الكمية
       field_4: safeText(quantity),
-
-      // {{5}} السعر
       field_5: safeText(priceText),
-
-      // {{6}} الشحن
       field_6: safeText(shippingText),
-
-      // {{7}} الإجمالي
       field_7: safeText(totalText),
-
-      // {{8}} العنوان التفصيلي
       field_8: safeText(detailedAddress),
-
-      // {{9}} العنوان الوطني
       field_9: safeText(nationalAddress),
 
       contact: {
@@ -241,7 +228,8 @@ module.exports = async function webhook(req, res) {
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
-    console.log("🚀 Sending Payload:", JSON.stringify(payload, null, 2));
+    console.log("🏪 Store:", storeTag);
+    console.log("🚀 Payload:", payload);
 
     const saasRes = await fetch(endpoint, {
       method: "POST",
@@ -259,13 +247,14 @@ module.exports = async function webhook(req, res) {
       return res.status(500).json({
         error: "saas_error",
         details: responseData,
-        debug_phone: { input: customerPhone, e164Phone, digitsPhone },
+        storeTag,
       });
     }
 
     console.log("✅ Success:", responseData);
     return res.status(200).json({
       status: "sent",
+      storeTag,
       data: responseData,
     });
 
