@@ -28,8 +28,6 @@ module.exports = async function webhook(req, res) {
 
     // =========================
     // Normalize Phone (Arabic Countries - E.164)
-    // - يرجع +XXXXXXXXX
-    // - يقبل رقم محلي بدون مفتاح
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
@@ -38,8 +36,8 @@ module.exports = async function webhook(req, res) {
 
       // لو جاي بكود دولة بالفعل (بدون +)
       const knownCodes = [
-        "966","971","20","249","967","962","965","974","973","968",
-        "964","212","213","216","218","970","961","963","222"
+        "966", "971", "20", "249", "967", "962", "965", "974", "973", "968",
+        "964", "212", "213", "216", "218", "970", "961", "963", "222"
       ];
 
       for (const code of knownCodes) {
@@ -60,7 +58,7 @@ module.exports = async function webhook(req, res) {
         return `+249${raw.substring(1)}`;
       }
 
-      // اليمن (تقريب شائع): 07xxxxxxx (9 أرقام) -> +967 7xxxxxxx
+      // اليمن: 07xxxxxxx (9 أرقام) -> +967 7xxxxxxx
       if (raw.startsWith("07") && raw.length === 9) {
         return `+967${raw.substring(1)}`;
       }
@@ -76,7 +74,7 @@ module.exports = async function webhook(req, res) {
         return `+966${raw.substring(1)}`; // Default KSA
       }
 
-      // fallback: لو رقم طويل مش معروف، نضيف +
+      // fallback
       return raw ? `+${raw}` : "";
     }
 
@@ -101,7 +99,6 @@ module.exports = async function webhook(req, res) {
       data.id ||
       "";
 
-    // لو عندك بلد في الطلب (مفيد لتفريق 05 بين السعودية والإمارات)
     const country =
       data.country ||
       data.shipping_country ||
@@ -111,9 +108,8 @@ module.exports = async function webhook(req, res) {
     // رقم الهاتف
     // =========================
     const e164Phone = normalizePhone(customerPhone, country); // +2010...
-    const digitsPhone = e164Phone.replace(/^\+/, "");         // 2010... (digits only)
+    const digitsPhone = e164Phone.replace(/^\+/, "");         // 2010...
 
-    // منصتك بتشتكي "at least 9 digits" -> نتحقق من digitsPhone
     if (!digitsPhone || digitsPhone.length < 9) {
       return res.status(400).json({
         error: "invalid_phone",
@@ -160,6 +156,11 @@ module.exports = async function webhook(req, res) {
     const totalNum =
       shippingNum > 0 ? priceNum + shippingNum : priceNum;
 
+    const priceText =
+      priceNum > 0 ? `${priceNum} ريال سعودي` : "غير محدد";
+
+    const totalText = `${totalNum} ريال سعودي`;
+
     // =========================
     // العنوان التفصيلي + العنوان الوطني
     // =========================
@@ -178,20 +179,12 @@ module.exports = async function webhook(req, res) {
       data.address_short ||
       "";
 
-    const nationalAddressClean =
-      String(nationalAddressRaw).trim();
+    const nationalAddressClean = String(nationalAddressRaw).trim();
 
     const nationalAddress =
       nationalAddressClean
         ? nationalAddressClean
         : "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
-
-    // =========================
-    // {{3}} = العنوان المسجل لدينا (التفصيلي ثم الوطني آخر شيء)
-    // =========================
-    const field3Text = safeText(
-      `العنوان التفصيلي: ${safeText(detailedAddress)} 🔴 العنوان الوطني: ${nationalAddress}`
-    );
 
     // =========================
     // ENV
@@ -205,23 +198,39 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // Payload WhatsApp (digits only حسب متطلبات منصتك)
+    // Payload WhatsApp (مطابق لـ {{1}} → {{9}})
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: "1_st",
-      template_language: "ar",
+      template_name: "ordar_confirmation",   // عدّل الاسم لو مختلف في المنصة
+      template_language: "ar_EG",
 
-      // {{1}}
+      // {{1}} اسم العميل
       field_1: safeText(customerName),
 
-      // {{2}} رقم الطلب + تفاصيل الطلب جنبها
-      field_2: safeText(
-        `${orderId} — المنتج: ${productName} | الكمية: ${quantity} | السعر: ${priceNum} ريال سعودي | الشحن: ${shippingText} | الإجمالي: ${totalNum} ريال سعودي`
-      ),
+      // {{2}} رقم الطلب
+      field_2: safeText(orderId),
 
-      // {{3}} العنوان
-      field_3: field3Text,
+      // {{3}} اسم المنتج
+      field_3: safeText(productName),
+
+      // {{4}} الكمية
+      field_4: safeText(quantity),
+
+      // {{5}} السعر
+      field_5: safeText(priceText),
+
+      // {{6}} الشحن
+      field_6: safeText(shippingText),
+
+      // {{7}} الإجمالي
+      field_7: safeText(totalText),
+
+      // {{8}} العنوان التفصيلي
+      field_8: safeText(detailedAddress),
+
+      // {{9}} العنوان الوطني
+      field_9: safeText(nationalAddress),
 
       contact: {
         first_name: safeText(customerName),
@@ -250,22 +259,4 @@ module.exports = async function webhook(req, res) {
       return res.status(500).json({
         error: "saas_error",
         details: responseData,
-        // Debug مساعد لو احتجته
-        debug_phone: { input: customerPhone, e164Phone, digitsPhone },
-      });
-    }
-
-    console.log("✅ Success:", responseData);
-    return res.status(200).json({
-      status: "sent",
-      data: responseData,
-    });
-
-  } catch (err) {
-    console.error("❌ Webhook Crash:", err);
-    return res.status(500).json({
-      error: "internal_error",
-      details: err?.message || String(err),
-    });
-  }
-};
+        debug_p_
