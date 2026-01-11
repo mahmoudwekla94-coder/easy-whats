@@ -37,22 +37,24 @@ module.exports = async function webhook(req, res) {
 
     const storeTag = String(storeTagRaw).toUpperCase();
 
-    // Config لكل Store (نفس SaaS بس تقدر تغير تمبلت)
+    // =========================
+    // Store Config (نفس التمبلت لكل اللاندات)
+    // =========================
     const storeConfig = {
       EQ: {
-        template: "ordar_confirmation_eq",
+        template: "ordar_confirmation",
         lang: "ar_EG",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       BZ: {
-        template: "ordar_confirmation_bz",
+        template: "ordar_confirmation",
         lang: "ar_EG",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       GZ: {
-        template: "ordar_confirmation_gz",
+        template: "ordar_confirmation",
         lang: "ar_EG",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
@@ -77,14 +79,19 @@ module.exports = async function webhook(req, res) {
         if (raw.startsWith(code)) return `+${raw}`;
       }
 
+      // مصر: 01xxxxxxxxx -> +20 1xxxxxxxxx
       if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
+      // السودان: 09xxxxxxxx -> +249 9xxxxxxxx
       if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
+      // اليمن: 07xxxxxxx (9 أرقام) -> +967 7xxxxxxx
       if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
+      // الأردن: 07xxxxxxxx (10 أرقام) -> +962 7xxxxxxxx
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
+      // السعودية / الإمارات: 05xxxxxxxx (10 أرقام)
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
-        return `+966${raw.substring(1)}`;
+        return `+966${raw.substring(1)}`; // default KSA
       }
 
       return raw ? `+${raw}` : "";
@@ -206,17 +213,34 @@ module.exports = async function webhook(req, res) {
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: cfg.template,
-      template_language: cfg.lang,
+      template_name: cfg.template,     // ordar_confirmation
+      template_language: cfg.lang,     // ar_EG
 
+      // {{1}} اسم العميل
       field_1: safeText(customerName),
-      field_2: safeText(`${orderId} (${storeTag})`),   // ⬅️ هنا ضفنا الـ EQ/BZ/GZ
+
+      // {{2}} رقم الطلب + التاج (EQ/BZ/GZ)
+      field_2: safeText(`${orderId} (${storeTag})`),
+
+      // {{3}} اسم المنتج
       field_3: safeText(productName),
+
+      // {{4}} الكمية
       field_4: safeText(quantity),
+
+      // {{5}} السعر
       field_5: safeText(priceText),
+
+      // {{6}} الشحن
       field_6: safeText(shippingText),
+
+      // {{7}} الإجمالي
       field_7: safeText(totalText),
+
+      // {{8}} العنوان التفصيلي
       field_8: safeText(detailedAddress),
+
+      // {{9}} العنوان الوطني
       field_9: safeText(nationalAddress),
 
       contact: {
@@ -229,6 +253,7 @@ module.exports = async function webhook(req, res) {
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
     console.log("🏪 Store:", storeTag);
+    console.log("🧩 Template:", cfg.template, "| Lang:", cfg.lang);
     console.log("🚀 Payload:", payload);
 
     const saasRes = await fetch(endpoint, {
