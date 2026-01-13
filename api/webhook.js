@@ -20,9 +20,15 @@ module.exports = async function webhook(req, res) {
     // =========================
     const safeText = (t) => {
       if (!t && t !== 0) return "";
+
       return String(t)
+        // 1) شيل أي \n أو \r أو \t مكتوبة كنص: "\n"
+        .replace(/\\[nrt]/g, " ")
+        // 2) شيل الـ newline / tab الفعليين
         .replace(/[\r\n\t]+/g, " ")
+        // 3) قلل أي whitespace متكرر لمسافة واحدة
         .replace(/\s{2,}/g, " ")
+        // 4) شيل المسافات من البداية والنهاية
         .trim();
     };
 
@@ -269,6 +275,20 @@ module.exports = async function webhook(req, res) {
 
     if (!saasRes.ok || responseData?.result === "failed") {
       console.error("❌ SaaS Error:", responseData);
+
+      // Debug زيادة على الفيلدز لو حبيت تشوف لو في \n أو مسافات
+      console.error("🔍 Debug Fields:", {
+        field_1: JSON.stringify(payload.field_1),
+        field_2: JSON.stringify(payload.field_2),
+        field_3: JSON.stringify(payload.field_3),
+        field_4: JSON.stringify(payload.field_4),
+        field_5: JSON.stringify(payload.field_5),
+        field_6: JSON.stringify(payload.field_6),
+        field_7: JSON.stringify(payload.field_7),
+        field_8: JSON.stringify(payload.field_8),
+        field_9: JSON.stringify(payload.field_9),
+      });
+
       return res.status(500).json({
         error: "saas_error",
         details: responseData,
