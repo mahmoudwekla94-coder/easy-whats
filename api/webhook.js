@@ -15,6 +15,12 @@ module.exports = async function webhook(req, res) {
   try {
     const data = req.body || {};
 
+    // هل الطلب جاي من Shopify؟ (فيه line_items لكن مفيش cart_items)
+    const isShopifyOrder =
+      Array.isArray(data.line_items) &&
+      data.line_items.length > 0 &&
+      !data.cart_items;
+
     // =========================
     // Helpers
     // =========================
@@ -33,7 +39,7 @@ module.exports = async function webhook(req, res) {
     };
 
     // =========================
-    // Store Tag Routing (EQ / BZ / GZ)
+    // Store Tag Routing (EQ / BZ / GZ / SH)
     // =========================
     const storeTagRaw =
       (req.query && req.query.storeTag) ||
@@ -60,6 +66,12 @@ module.exports = async function webhook(req, res) {
         defaultCountry: "KSA",
       },
       GZ: {
+        template: "ordar_confirmation",
+        lang: "ar_EG",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      SH: {
         template: "ordar_confirmation",
         lang: "ar_EG",
         currency: "ريال سعودي",
@@ -104,31 +116,139 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // بيانات العميل
+    // بيانات العميل + الطلب (EasyOrders VS Shopify)
     // =========================
-    const customerName =
-      data.full_name ||
-      data.name ||
-      data.customer_name ||
-      "عميلنا العزيز";
+    let customerName;
+    let customerPhone;
+    let orderId;
+    let country;
 
-    const customerPhone =
-      data.phone ||
-      data.phone_alt ||
-      data.customer_phone ||
-      "";
+    let firstItem = {};
+    let priceRaw;
+    let shippingRaw;
+    let detailedAddress;
+    let nationalAddressRaw;
 
-    const orderId =
-      data.short_id ||
-      data.order_id ||
-      data.id ||
-      "";
+    if (isShopifyOrder) {
+      // 👇 طلب جاي من Shopify (Order Webhook)
+      const shipping = data.shipping_address || {};
+      const billing = data.billing_address || {};
+      const lineItem = (data.line_items && data.line_items[0]) || {};
 
-    const country =
-      data.country ||
-      data.shipping_country ||
-      cfg.defaultCountry ||
-      "KSA";
+      customerName =
+        (shipping.first_name || "") + " " + (shipping.last_name || "") ||
+        shipping.name ||
+        billing.name ||
+        "عميلنا العزيز";
+
+      customerPhone =
+        shipping.phone ||
+        data.phone ||
+        (data.customer && data.customer.phone) ||
+        data.customer_phone ||
+        "";
+
+      // رقم الطلب من Shopify (name بيبقى #1001 مثلاً)
+      orderId =
+        data.name ||        // مثل "#1001"
+        data.order_number || // 1001
+        data.id ||
+        "";
+
+      country =
+        shipping.country_code ||
+        shipping.country ||
+        cfg.defaultCountry ||
+        "KSA";
+
+      firstItem = {
+        product: { name: lineItem.title || "منتج" },
+        quantity: lineItem.quantity != null ? lineItem.quantity : 1,
+        price: lineItem.price || data.total_price || 0,
+      };
+
+      priceRaw =
+        firstItem.price ??
+        data.total_price ??
+        0;
+
+      const shippingLine = (data.shipping_lines && data.shipping_lines[0]) || {};
+      shippingRaw =
+        shippingLine.price ??
+        (data.total_shipping_price_set &&
+          data.total_shipping_price_set.shop_money &&
+          data.total_shipping_price_set.shop_money.amount) ??
+        0;
+
+      detailedAddress = [
+        shipping.address1,
+        shipping.address2,
+        shipping.city,
+        shipping.province,
+        shipping.zip,
+      ]
+        .filter(Boolean)
+        .join(" - ");
+
+      nationalAddressRaw = ""; // Shopify مش هيبعت national address
+    } else {
+      // 👇 طلب جاي من EasyOrders (الكود القديم)
+      customerName =
+        data.full_name ||
+        data.name ||
+        data.customer_name ||
+        "عميلنا العزيز";
+
+      customerPhone =
+        data.phone ||
+        data.phone_alt ||
+        data.customer_phone ||
+        "";
+
+      orderId =
+        data.short_id ||
+        data.order_id ||
+        data.id ||
+        "";
+
+      country =
+        data.country ||
+        data.shipping_country ||
+        cfg.defaultCountry ||
+        "KSA";
+
+      firstItem = data.cart_items?.[0] || {};
+
+      priceRaw =
+        firstItem.price ??
+        data.total_cost ??
+        data.cost ??
+        0;
+
+      shippingRaw =
+        data.shipping_cost ??
+        data.shipping_fee ??
+        data.shipping_price ??
+        data.delivery_cost ??
+        data.shipping ??
+        data.delivery ??
+        0;
+
+      detailedAddress =
+        data.address ||
+        data.full_address ||
+        data.shipping_address ||
+        data.address_text ||
+        data.city ||
+        "غير متوفر";
+
+      nationalAddressRaw =
+        data.national_address ||
+        data.short_address ||
+        data.shortAddress ||
+        data.address_short ||
+        "";
+    }
 
     // =========================
     // رقم الهاتف
@@ -146,31 +266,14 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // المنتج
+    // الكمية
     // =========================
-    const firstItem = data.cart_items?.[0] || {};
-    const productName = firstItem.product?.name || "منتج";
     const quantity =
       firstItem.quantity != null ? firstItem.quantity : 1;
 
-    const priceRaw =
-      firstItem.price ??
-      data.total_cost ??
-      data.cost ??
-      0;
-
     // =========================
-    // الشحن + الإجمالي
+    // السعر + الشحن + الإجمالي
     // =========================
-    const shippingRaw =
-      data.shipping_cost ??
-      data.shipping_fee ??
-      data.shipping_price ??
-      data.delivery_cost ??
-      data.shipping ??
-      data.delivery ??
-      0;
-
     const priceNum = Number(String(priceRaw).replace(/[^0-9.]/g, "")) || 0;
     const shippingNum = Number(String(shippingRaw).replace(/[^0-9.]/g, "")) || 0;
 
@@ -181,26 +284,10 @@ module.exports = async function webhook(req, res) {
     const priceText = priceNum > 0 ? `${priceNum} ${currencyLabel}` : "غير محدد";
     const totalText = `${totalNum} ${currencyLabel}`;
 
-    // =========================
-    // العنوان التفصيلي + الوطني
-    // =========================
-    const detailedAddress =
-      data.address ||
-      data.full_address ||
-      data.shipping_address ||
-      data.address_text ||
-      data.city ||
-      "غير متوفر";
-
-    const nationalAddressRaw =
-      data.national_address ||
-      data.short_address ||
-      data.shortAddress ||
-      data.address_short ||
-      "";
+    const productName = firstItem.product?.name || "منتج";
 
     const nationalAddress =
-      String(nationalAddressRaw).trim() ||
+      String(nationalAddressRaw || "").trim() ||
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
     // =========================
@@ -225,8 +312,14 @@ module.exports = async function webhook(req, res) {
       // {{1}} اسم العميل
       field_1: safeText(customerName),
 
-      // {{2}} رقم الطلب + التاج (EQ/BZ/GZ)
-      field_2: safeText(`${orderId} (${storeTag})`),
+      // {{2}}:
+      // لو الطلب من Shopify (storeTag = SH) نخليها "SH" بس
+      // لو من EasyOrders نخليها زي ما كانت: رقم الطلب + التاج (EQ/BZ/GZ)
+      field_2: safeText(
+        storeTag === "SH"
+          ? "SH"
+          : `${orderId} (${storeTag})`
+      ),
 
       // {{3}} اسم المنتج
       field_3: safeText(productName),
@@ -258,7 +351,7 @@ module.exports = async function webhook(req, res) {
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
-    console.log("🏪 Store:", storeTag);
+    console.log("🏪 Store:", storeTag, "| isShopifyOrder:", isShopifyOrder);
     console.log("🧩 Template:", cfg.template, "| Lang:", cfg.lang);
     console.log("🚀 Payload:", payload);
 
@@ -276,7 +369,6 @@ module.exports = async function webhook(req, res) {
     if (!saasRes.ok || responseData?.result === "failed") {
       console.error("❌ SaaS Error:", responseData);
 
-      // Debug زيادة على الفيلدز لو حبيت تشوف لو في \n أو مسافات
       console.error("🔍 Debug Fields:", {
         field_1: JSON.stringify(payload.field_1),
         field_2: JSON.stringify(payload.field_2),
