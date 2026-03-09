@@ -1,244 +1,53 @@
 // api/webhook.js
 
 module.exports = async function webhook(req, res) {
-  if (req.method === "GET") {
-    return res.status(200).send("Webhook Running ✅");
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   try {
+    if (req.method === "GET") {
+      return res.status(200).send("Webhook Running ✅");
+    }
+
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    console.log("STEP 1: request received");
+
     const data = req.body || {};
-
-    const safeText = (t) => {
-      if (!t && t !== 0) return "";
-      return String(t)
-        .replace(/\\[nrt]/g, " ")
-        .replace(/[\r\n\t]+/g, " ")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-    };
-
-    const toNumber = (v) =>
-      Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
-
-    const u = new URL(req.url, `https://${req.headers.host}`);
-    const storeTagRaw =
-      u.searchParams.get("storeTag") ||
-      data.storeTag ||
-      data.tag ||
-      "EQ";
-
-    const storeTag = String(storeTagRaw).toUpperCase();
-
-    const storeConfig = {
-      EQ: { currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { currency: "ريال سعودي", defaultCountry: "KSA" },
-    };
-
-    const cfg = storeConfig[storeTag] || storeConfig.EQ;
-
-    const looksLikeShopify =
-      (typeof data.name === "string" && data.name.startsWith("#")) ||
-      !!data.shipping_address ||
-      !!data.billing_address ||
-      (Array.isArray(data.line_items) && data.line_items.length > 0);
-
-    const isShopifyOrder = looksLikeShopify && !data.cart_items;
-
-    function normalizePhone(phone, country = "KSA") {
-      if (!phone) return "";
-      let raw = String(phone).replace(/[^0-9]/g, "");
-
-      const knownCodes = [
-        "966", "971", "20", "249", "967", "962", "965", "974", "973", "968",
-        "964", "212", "213", "216", "218", "970", "961", "963", "222"
-      ];
-
-      for (const code of knownCodes) {
-        if (raw.startsWith(code)) return raw;
-      }
-
-      if (raw.startsWith("01") && raw.length === 11) return `20${raw.substring(1)}`;
-      if (raw.startsWith("09") && raw.length === 10) return `249${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 9) return `967${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 10) return `962${raw.substring(1)}`;
-
-      if (raw.startsWith("05") && raw.length === 10) {
-        if (country === "UAE") return `971${raw.substring(1)}`;
-        return `966${raw.substring(1)}`;
-      }
-
-      return raw;
-    }
-
-    let customerName, customerPhone, orderId, country;
-    let productName, quantity = 1;
-    let priceRaw = 0, shippingRaw = 0;
-    let detailedAddress = "غير متوفر";
-    let nationalAddressRaw = "";
-
-    if (isShopifyOrder) {
-      const shipping = data.shipping_address || {};
-      const billing = data.billing_address || {};
-      const items = Array.isArray(data.line_items) ? data.line_items : [];
-      const firstItem = items[0] || {};
-
-      const fullName = safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`);
-      customerName =
-        fullName ||
-        safeText(shipping.name) ||
-        safeText(billing.name) ||
-        "عميلنا العزيز";
-
-      customerPhone =
-        shipping.phone ||
-        data.phone ||
-        data.customer?.phone ||
-        "";
-
-      orderId = data.name || data.order_number || data.id || "";
-
-      country =
-        shipping.country_code ||
-        shipping.country ||
-        cfg.defaultCountry;
-
-      quantity = firstItem.quantity ?? 1;
-
-      productName =
-        items.length > 1
-          ? `${firstItem.title} + ${items.length - 1} منتجات أخرى`
-          : firstItem.title || "منتج";
-
-      priceRaw = firstItem.price ?? data.total_price ?? 0;
-
-      const shippingLine = data.shipping_lines?.[0] || {};
-      shippingRaw =
-        shippingLine.price ??
-        data.total_shipping_price_set?.shop_money?.amount ??
-        0;
-
-      detailedAddress = [
-        shipping.address1,
-        shipping.address2,
-        shipping.city,
-        shipping.province,
-        shipping.zip,
-      ].filter(Boolean).join(" - ");
-
-    } else {
-      customerName =
-        data.full_name ||
-        data.name ||
-        data.customer_name ||
-        "عميلنا العزيز";
-
-      customerPhone =
-        data.phone ||
-        data.phone_alt ||
-        data.customer_phone ||
-        "";
-
-      orderId =
-        data.short_id ||
-        data.order_id ||
-        data.id ||
-        "";
-
-      country =
-        data.country ||
-        data.shipping_country ||
-        cfg.defaultCountry;
-
-      const firstItem = data.cart_items?.[0] || {};
-      quantity = firstItem.quantity ?? 1;
-      productName = firstItem.product?.name || "منتج";
-
-      priceRaw =
-        firstItem.price ??
-        data.total_cost ??
-        data.cost ??
-        0;
-
-      shippingRaw =
-        data.shipping_cost ??
-        data.shipping_fee ??
-        data.shipping_price ??
-        data.delivery_cost ??
-        data.shipping ??
-        0;
-
-      detailedAddress =
-        data.address ||
-        data.full_address ||
-        data.shipping_address ||
-        data.city ||
-        "غير متوفر";
-
-      nationalAddressRaw =
-        data.national_address ||
-        data.short_address ||
-        "";
-    }
-
-    const digitsPhone = normalizePhone(customerPhone, country);
-
-    if (!digitsPhone || digitsPhone.length < 9) {
-      return res.status(400).json({ error: "invalid_phone", customerPhone });
-    }
-
-    const priceNum = toNumber(priceRaw);
-    const shippingNum = toNumber(shippingRaw);
-    const totalNum = priceNum + shippingNum;
-
-    const currency = cfg.currency;
-    const priceText = priceNum ? `${priceNum} ${currency}` : "غير محدد";
-    const shippingText = shippingNum ? `${shippingNum} ${currency}` : "مجاني";
-    const totalText = `${totalNum} ${currency}`;
-
-    const nationalAddress =
-      safeText(nationalAddressRaw) ||
-      "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
+    console.log("STEP 2: body parsed", JSON.stringify(data));
 
     const JOUD_WORKFLOW_URL = process.env.JOUD_WORKFLOW_URL;
+    console.log("STEP 3: workflow url exists =", !!JOUD_WORKFLOW_URL);
+    console.log("STEP 4: workflow url =", JOUD_WORKFLOW_URL);
 
     if (!JOUD_WORKFLOW_URL) {
       return res.status(500).json({
         error: "missing_env",
-        missing: {
-          JOUD_WORKFLOW_URL: true,
-        },
+        missing: "JOUD_WORKFLOW_URL",
       });
     }
 
     const payload = {
-      phone: digitsPhone,
-      full_name: safeText(customerName),
-      short_id: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
-      address: safeText(detailedAddress),
-      national_address: safeText(nationalAddress),
+      phone: "201000997941",
+      full_name: "محمود",
+      short_id: "26023 (EQ)",
+      address: "الرياض جدة",
+      national_address: "غير متوفر",
       cart_items: [
         {
-          quantity: quantity,
-          price: priceNum,
+          quantity: 1,
+          price: 99,
           product: {
-            name: safeText(productName),
+            name: "مجفف الشعر الاصلي 5 في 1 بقوة 1000 واط",
           },
         },
       ],
-      shipping_cost: shippingNum,
-      total_cost: totalNum,
-      storeTag: storeTag,
-      source: "vercel-webhook",
+      shipping_cost: 0,
+      total_cost: 99,
+      storeTag: "EQ",
+      source: "vercel-test",
     };
 
-    console.log("JOUD_WORKFLOW_URL:", JOUD_WORKFLOW_URL);
-    console.log("Payload:", JSON.stringify(payload, null, 2));
+    console.log("STEP 5: sending payload", JSON.stringify(payload));
 
     const joudRes = await fetch(JOUD_WORKFLOW_URL, {
       method: "POST",
@@ -248,33 +57,18 @@ module.exports = async function webhook(req, res) {
       body: JSON.stringify(payload),
     });
 
+    console.log("STEP 6: joud status =", joudRes.status);
+
     const rawText = await joudRes.text();
-    console.log("JOUD status:", joudRes.status);
-    console.log("JOUD response:", rawText);
-
-    let responseData = null;
-    try {
-      responseData = JSON.parse(rawText);
-    } catch {
-      responseData = rawText;
-    }
-
-    if (!joudRes.ok) {
-      return res.status(500).json({
-        error: "joud_workflow_error",
-        status: joudRes.status,
-        responseData,
-      });
-    }
+    console.log("STEP 7: joud response =", rawText);
 
     return res.status(200).json({
-      status: "sent_to_joud_workflow",
-      storeTag,
-      data: responseData,
+      ok: true,
+      status: joudRes.status,
+      response: rawText,
     });
-
   } catch (err) {
-    console.error("SEND ERROR:", err);
+    console.error("FATAL ERROR:", err);
     return res.status(500).json({
       error: "internal_error",
       details: err?.message || String(err),
