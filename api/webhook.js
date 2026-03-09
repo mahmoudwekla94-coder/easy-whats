@@ -46,10 +46,10 @@ module.exports = async function webhook(req, res) {
     // Store Config
     // =========================
     const storeConfig = {
-      EQ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
@@ -239,8 +239,8 @@ module.exports = async function webhook(req, res) {
 
     const payload = {
       phone_number: digitsPhone,
-      template_name: cfg.template,     // ✅ ordar_confirmation
-      template_language: cfg.lang,     // ✅ ar
+      template_name: cfg.template,
+      template_language: cfg.lang,
 
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
