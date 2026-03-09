@@ -1,9 +1,6 @@
 // api/webhook.js
 
 module.exports = async function webhook(req, res) {
-  // =========================
-  // Health Check
-  // =========================
   if (req.method === "GET") {
     return res.status(200).send("Webhook Running ✅");
   }
@@ -15,9 +12,6 @@ module.exports = async function webhook(req, res) {
   try {
     const data = req.body || {};
 
-    // =========================
-    // Helpers
-    // =========================
     const safeText = (t) => {
       if (!t && t !== 0) return "";
       return String(t)
@@ -30,9 +24,6 @@ module.exports = async function webhook(req, res) {
     const toNumber = (v) =>
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
-    // =========================
-    // Store Tag (WHATWG URL)
-    // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
       u.searchParams.get("storeTag") ||
@@ -42,9 +33,6 @@ module.exports = async function webhook(req, res) {
 
     const storeTag = String(storeTagRaw).toUpperCase();
 
-    // =========================
-    // Store Config
-    // =========================
     const storeConfig = {
       EQ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
       BZ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
@@ -54,9 +42,6 @@ module.exports = async function webhook(req, res) {
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
 
-    // =========================
-    // Detect Shopify Order
-    // =========================
     const looksLikeShopify =
       (typeof data.name === "string" && data.name.startsWith("#")) ||
       !!data.shipping_address ||
@@ -65,9 +50,6 @@ module.exports = async function webhook(req, res) {
 
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
-    // =========================
-    // Normalize Phone (E.164)
-    // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
       let raw = String(phone).replace(/[^0-9]/g, "");
@@ -94,9 +76,6 @@ module.exports = async function webhook(req, res) {
       return raw ? `+${raw}` : "";
     }
 
-    // =========================
-    // Data Mapping
-    // =========================
     let customerName, customerPhone, orderId, country;
     let productName, quantity = 1;
     let priceRaw = 0, shippingRaw = 0;
@@ -228,15 +207,13 @@ module.exports = async function webhook(req, res) {
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
     const API_BASE_URL = process.env.SAAS_API_BASE_URL;
-    const VENDOR_UID = process.env.SAAS_VENDOR_UID;
     const API_TOKEN = process.env.SAAS_API_TOKEN;
 
-    if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
+    if (!API_BASE_URL || !API_TOKEN) {
       return res.status(500).json({
         error: "missing_env",
         missing: {
           SAAS_API_BASE_URL: !API_BASE_URL,
-          SAAS_VENDOR_UID: !VENDOR_UID,
           SAAS_API_TOKEN: !API_TOKEN,
         },
       });
@@ -246,7 +223,6 @@ module.exports = async function webhook(req, res) {
       phone_number: digitsPhone,
       template_name: cfg.template,
       template_language: cfg.lang,
-
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
       field_3: safeText(productName),
@@ -256,7 +232,6 @@ module.exports = async function webhook(req, res) {
       field_7: safeText(totalText),
       field_8: safeText(detailedAddress),
       field_9: safeText(nationalAddress),
-
       contact: {
         first_name: safeText(customerName),
         phone_number: digitsPhone,
@@ -264,10 +239,9 @@ module.exports = async function webhook(req, res) {
       },
     };
 
-    const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
+    const endpoint = `${API_BASE_URL}/contact/send-template-message`;
 
     console.log("API_BASE_URL:", API_BASE_URL);
-    console.log("VENDOR_UID:", VENDOR_UID);
     console.log("API_TOKEN exists:", !!API_TOKEN);
     console.log("Endpoint:", endpoint);
     console.log("Payload:", JSON.stringify(payload, null, 2));
