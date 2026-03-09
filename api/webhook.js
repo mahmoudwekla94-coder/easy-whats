@@ -34,10 +34,10 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     const storeConfig = {
-      EQ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { template: "confirmation_order", lang: "en", currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
@@ -60,20 +60,20 @@ module.exports = async function webhook(req, res) {
       ];
 
       for (const code of knownCodes) {
-        if (raw.startsWith(code)) return `+${raw}`;
+        if (raw.startsWith(code)) return raw;
       }
 
-      if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
-      if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 9) return `+967${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
+      if (raw.startsWith("01") && raw.length === 11) return `20${raw.substring(1)}`;
+      if (raw.startsWith("09") && raw.length === 10) return `249${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 9) return `967${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 10) return `962${raw.substring(1)}`;
 
       if (raw.startsWith("05") && raw.length === 10) {
-        if (country === "UAE") return `+971${raw.substring(1)}`;
-        return `+966${raw.substring(1)}`;
+        if (country === "UAE") return `971${raw.substring(1)}`;
+        return `966${raw.substring(1)}`;
       }
 
-      return raw ? `+${raw}` : "";
+      return raw;
     }
 
     let customerName, customerPhone, orderId, country;
@@ -186,8 +186,7 @@ module.exports = async function webhook(req, res) {
         "";
     }
 
-    const e164Phone = normalizePhone(customerPhone, country);
-    const digitsPhone = e164Phone.replace(/^\+/, "");
+    const digitsPhone = normalizePhone(customerPhone, country);
 
     if (!digitsPhone || digitsPhone.length < 9) {
       return res.status(400).json({ error: "invalid_phone", customerPhone });
@@ -206,58 +205,52 @@ module.exports = async function webhook(req, res) {
       safeText(nationalAddressRaw) ||
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
-    const API_BASE_URL = process.env.SAAS_API_BASE_URL;
-    const API_TOKEN = process.env.SAAS_API_TOKEN;
+    const JOUD_WORKFLOW_URL = process.env.JOUD_WORKFLOW_URL;
 
-    if (!API_BASE_URL || !API_TOKEN) {
+    if (!JOUD_WORKFLOW_URL) {
       return res.status(500).json({
         error: "missing_env",
         missing: {
-          SAAS_API_BASE_URL: !API_BASE_URL,
-          SAAS_API_TOKEN: !API_TOKEN,
+          JOUD_WORKFLOW_URL: true,
         },
       });
     }
 
     const payload = {
-      phone_number: digitsPhone,
-      template_name: cfg.template,
-      template_language: cfg.lang,
-      field_1: safeText(customerName),
-      field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
-      field_3: safeText(productName),
-      field_4: safeText(quantity),
-      field_5: safeText(priceText),
-      field_6: safeText(shippingText),
-      field_7: safeText(totalText),
-      field_8: safeText(detailedAddress),
-      field_9: safeText(nationalAddress),
-      contact: {
-        first_name: safeText(customerName),
-        phone_number: digitsPhone,
-        country: "auto",
-      },
+      phone: digitsPhone,
+      full_name: safeText(customerName),
+      short_id: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
+      address: safeText(detailedAddress),
+      national_address: safeText(nationalAddress),
+      cart_items: [
+        {
+          quantity: quantity,
+          price: priceNum,
+          product: {
+            name: safeText(productName),
+          },
+        },
+      ],
+      shipping_cost: shippingNum,
+      total_cost: totalNum,
+      storeTag: storeTag,
+      source: "vercel-webhook",
     };
 
-    const endpoint = `${API_BASE_URL}/contact/send-template-message`;
-
-    console.log("API_BASE_URL:", API_BASE_URL);
-    console.log("API_TOKEN exists:", !!API_TOKEN);
-    console.log("Endpoint:", endpoint);
+    console.log("JOUD_WORKFLOW_URL:", JOUD_WORKFLOW_URL);
     console.log("Payload:", JSON.stringify(payload, null, 2));
 
-    const saasRes = await fetch(endpoint, {
+    const joudRes = await fetch(JOUD_WORKFLOW_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${API_TOKEN}`,
       },
       body: JSON.stringify(payload),
     });
 
-    const rawText = await saasRes.text();
-    console.log("SAAS status:", saasRes.status);
-    console.log("SAAS response:", rawText);
+    const rawText = await joudRes.text();
+    console.log("JOUD status:", joudRes.status);
+    console.log("JOUD response:", rawText);
 
     let responseData = null;
     try {
@@ -266,17 +259,16 @@ module.exports = async function webhook(req, res) {
       responseData = rawText;
     }
 
-    if (!saasRes.ok || responseData?.result === "failed") {
+    if (!joudRes.ok) {
       return res.status(500).json({
-        error: "saas_error",
-        endpoint,
-        status: saasRes.status,
+        error: "joud_workflow_error",
+        status: joudRes.status,
         responseData,
       });
     }
 
     return res.status(200).json({
-      status: "sent",
+      status: "sent_to_joud_workflow",
       storeTag,
       data: responseData,
     });
