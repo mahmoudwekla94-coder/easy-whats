@@ -73,8 +73,8 @@ module.exports = async function webhook(req, res) {
       let raw = String(phone).replace(/[^0-9]/g, "");
 
       const knownCodes = [
-        "966","971","20","249","967","962","965","974","973","968",
-        "964","212","213","216","218","970","961","963","222"
+        "966", "971", "20", "249", "967", "962", "965", "974", "973", "968",
+        "964", "212", "213", "216", "218", "970", "961", "963", "222"
       ];
 
       for (const code of knownCodes) {
@@ -83,7 +83,7 @@ module.exports = async function webhook(req, res) {
 
       if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
       if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 9) return `+967${raw.substring(1)}`;
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
       if (raw.startsWith("05") && raw.length === 10) {
@@ -234,6 +234,11 @@ module.exports = async function webhook(req, res) {
     if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
       return res.status(500).json({
         error: "missing_env",
+        missing: {
+          SAAS_API_BASE_URL: !API_BASE_URL,
+          SAAS_VENDOR_UID: !VENDOR_UID,
+          SAAS_API_TOKEN: !API_TOKEN,
+        },
       });
     }
 
@@ -261,6 +266,12 @@ module.exports = async function webhook(req, res) {
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
+    console.log("API_BASE_URL:", API_BASE_URL);
+    console.log("VENDOR_UID:", VENDOR_UID);
+    console.log("API_TOKEN exists:", !!API_TOKEN);
+    console.log("Endpoint:", endpoint);
+    console.log("Payload:", JSON.stringify(payload, null, 2));
+
     const saasRes = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -270,15 +281,34 @@ module.exports = async function webhook(req, res) {
       body: JSON.stringify(payload),
     });
 
-    const responseData = await saasRes.json().catch(() => null);
+    const rawText = await saasRes.text();
+    console.log("SAAS status:", saasRes.status);
+    console.log("SAAS response:", rawText);
 
-    if (!saasRes.ok || responseData?.result === "failed") {
-      return res.status(500).json({ error: "saas_error", responseData });
+    let responseData = null;
+    try {
+      responseData = JSON.parse(rawText);
+    } catch {
+      responseData = rawText;
     }
 
-    return res.status(200).json({ status: "sent", storeTag, data: responseData });
+    if (!saasRes.ok || responseData?.result === "failed") {
+      return res.status(500).json({
+        error: "saas_error",
+        endpoint,
+        status: saasRes.status,
+        responseData,
+      });
+    }
+
+    return res.status(200).json({
+      status: "sent",
+      storeTag,
+      data: responseData,
+    });
 
   } catch (err) {
+    console.error("SEND ERROR:", err);
     return res.status(500).json({
       error: "internal_error",
       details: err?.message || String(err),
