@@ -47,25 +47,25 @@ module.exports = async function webhook(req, res) {
     // =========================
     const storeConfig = {
       EQ: {
-        template: "ordar_confirmation",
+        template: "t_utillty",
         lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       BZ: {
-        template: "ordar_confirmation",
+        template: "t_utillty",
         lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       GZ: {
-        template: "ordar_confirmation",
+        template: "t_utillty",
         lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       SH: {
-        template: "ordar_confirmation",
+        template: "t_utillty",
         lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
@@ -283,7 +283,7 @@ module.exports = async function webhook(req, res) {
 
     const payload = {
       phone_number: digitsPhone,
-      template_name: "ordar_confirmation",
+      template_name: "t_utillty",
       template_language: "ar",
 
       field_1: safeText(customerName),
