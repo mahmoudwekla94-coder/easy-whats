@@ -15,6 +15,12 @@ module.exports = async function webhook(req, res) {
   try {
     const data = req.body || {};
 
+    // هل الطلب جاي من Shopify؟
+    const isShopifyOrder =
+      Array.isArray(data.line_items) &&
+      data.line_items.length > 0 &&
+      !data.cart_items;
+
     // =========================
     // Helpers
     // =========================
@@ -30,65 +36,8 @@ module.exports = async function webhook(req, res) {
     const toNumber = (v) =>
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
-    // =========================
-    // Store Tag (WHATWG URL)
-    // =========================
-    const u = new URL(req.url, `https://${req.headers.host}`);
-    const storeTagRaw =
-      u.searchParams.get("storeTag") ||
-      data.storeTag ||
-      data.tag ||
-      "EQ";
-
-    const storeTag = String(storeTagRaw).toUpperCase();
-
-    // =========================
-    // Store Config
-    // =========================
-    const storeConfig = {
-      EQ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      BZ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      GZ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      SH: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-    };
-
-    const cfg = storeConfig[storeTag] || storeConfig.EQ;
-
-    // =========================
-    // Detect Shopify Order
-    // =========================
-    const looksLikeShopify =
-      (typeof data.name === "string" && data.name.startsWith("#")) ||
-      !!data.shipping_address ||
-      !!data.billing_address ||
-      (Array.isArray(data.line_items) && data.line_items.length > 0);
-
-    const isShopifyOrder = looksLikeShopify && !data.cart_items;
-
-    // =========================
     // Normalize Phone (E.164)
-    // =========================
-    function normalizePhone(phone, country = "KSA") {
+    function normalizePhone(phone) {
       if (!phone) return "";
 
       let raw = String(phone).replace(/[^0-9]/g, "");
@@ -99,239 +48,268 @@ module.exports = async function webhook(req, res) {
       ];
 
       for (const code of knownCodes) {
-        if (raw.startsWith(code)) return `+${raw}`;
+        if (raw.startsWith(code)) return raw;
       }
 
-      // Egypt
-      if (raw.startsWith("01") && raw.length === 11) {
-        return `+20${raw.substring(1)}`;
-      }
-
-      // Sudan
-      if (raw.startsWith("09") && raw.length === 10) {
-        return `+249${raw.substring(1)}`;
-      }
-
-      // Yemen
-      if (raw.startsWith("07") && raw.length === 9) {
-        return `+967${raw.substring(1)}`;
-      }
-
-      // Jordan
-      if (raw.startsWith("07") && raw.length === 10) {
-        return `+962${raw.substring(1)}`;
-      }
-
-      // Saudi / UAE local mobile
+      // KSA local
       if (raw.startsWith("05") && raw.length === 10) {
-        if (country === "UAE") return `+971${raw.substring(1)}`;
-        return `+966${raw.substring(1)}`;
+        return `966${raw.substring(1)}`;
       }
 
-      return raw ? `+${raw}` : "";
+      // Egypt local
+      if (raw.startsWith("01") && raw.length === 11) {
+        return `20${raw.substring(1)}`;
+      }
+
+      // UAE local
+      if (raw.startsWith("05") && raw.length === 10) {
+        return `971${raw.substring(1)}`;
+      }
+
+      return raw;
     }
 
     // =========================
-    // Data Mapping
+    // Store Tag (WHATWG URL)
     // =========================
-    let customerName, customerPhone, orderId, country;
-    let productName, quantity = 1;
-    let priceRaw = 0, shippingRaw = 0;
-    let detailedAddress = "غير متوفر";
-    let nationalAddressRaw = "";
+    const u = new URL(req.url, `https://${req.headers.host}`);
+    const storeTag = safeText(u.searchParams.get("storeTag") || "EQ");
+
+    // =========================
+    // Extract Order Data
+    // =========================
+    let customerName = "";
+    let phone = "";
+    let orderId = "";
+    let productName = "";
+    let quantity = 1;
+    let productPrice = 0;
+    let shipping = 0;
+    let total = 0;
+    let address = "";
+    let nationalAddress = "";
 
     if (isShopifyOrder) {
-      const shipping = data.shipping_address || {};
-      const billing = data.billing_address || {};
-      const items = Array.isArray(data.line_items) ? data.line_items : [];
-      const firstItem = items[0] || {};
+      // Shopify
+      const shippingAddress = data.shipping_address || {};
+      const billingAddress = data.billing_address || {};
+      const firstItem = Array.isArray(data.line_items) ? data.line_items[0] : {};
 
-      const fullName = safeText(
-        `${shipping.first_name || ""} ${shipping.last_name || ""}`
+      customerName = safeText(
+        data.customer?.first_name && data.customer?.last_name
+          ? `${data.customer.first_name} ${data.customer.last_name}`
+          : data.customer?.first_name ||
+              shippingAddress.name ||
+              billingAddress.name ||
+              "Customer"
       );
 
-      customerName =
-        fullName ||
-        safeText(shipping.name) ||
-        safeText(billing.name) ||
-        "عميلنا العزيز";
+      phone = normalizePhone(
+        shippingAddress.phone ||
+          billingAddress.phone ||
+          data.phone ||
+          data.customer?.phone ||
+          ""
+      );
 
-      customerPhone =
-        shipping.phone ||
-        data.phone ||
-        data.customer?.phone ||
-        "";
+      orderId = safeText(data.order_number || data.name || data.id || "");
+      productName = safeText(firstItem?.name || "Product");
+      quantity = toNumber(firstItem?.quantity || 1);
+      productPrice = toNumber(firstItem?.price || 0);
+      shipping = toNumber(
+        data.shipping_lines?.[0]?.price ||
+          data.total_shipping_price_set?.shop_money?.amount ||
+          0
+      );
+      total = toNumber(data.current_total_price || data.total_price || 0);
 
-      orderId = data.name || data.order_number || data.id || "";
+      address = safeText(
+        [
+          shippingAddress.address1,
+          shippingAddress.address2,
+          shippingAddress.city,
+          shippingAddress.province,
+          shippingAddress.country
+        ]
+          .filter(Boolean)
+          .join(" - ")
+      );
 
-      country =
-        shipping.country_code ||
-        shipping.country ||
-        cfg.defaultCountry;
-
-      quantity = firstItem.quantity ?? 1;
-
-      productName =
-        items.length > 1
-          ? `${firstItem.title} + ${items.length - 1} منتجات أخرى`
-          : firstItem.title || "منتج";
-
-      priceRaw = firstItem.price ?? data.total_price ?? 0;
-
-      const shippingLine = data.shipping_lines?.[0] || {};
-      shippingRaw =
-        shippingLine.price ??
-        data.total_shipping_price_set?.shop_money?.amount ??
-        0;
-
-      detailedAddress = [
-        shipping.address1,
-        shipping.address2,
-        shipping.city,
-        shipping.province,
-        shipping.zip,
-      ]
-        .filter(Boolean)
-        .join(" - ");
+      nationalAddress = safeText(
+        shippingAddress.company ||
+          data.note ||
+          "National Address not available"
+      );
     } else {
-      customerName =
-        data.full_name ||
-        data.name ||
+      // EasyOrders / Custom webhook
+      const firstItem = Array.isArray(data.cart_items) ? data.cart_items[0] : {};
+
+      customerName = safeText(
         data.customer_name ||
-        "عميلنا العزيز";
+          data.full_name ||
+          data.name ||
+          "Customer"
+      );
 
-      customerPhone =
+      phone = normalizePhone(
         data.phone ||
-        data.phone_alt ||
-        data.customer_phone ||
-        "";
+          data.mobile ||
+          data.customer_phone ||
+          ""
+      );
 
-      orderId =
+      orderId = safeText(
         data.short_id ||
-        data.order_id ||
-        data.id ||
-        "";
+          data.order_number ||
+          data.id ||
+          ""
+      );
 
-      country =
-        data.country ||
-        data.shipping_country ||
-        cfg.defaultCountry;
+      productName = safeText(
+        firstItem?.name ||
+          data.product_name ||
+          "Product"
+      );
 
-      const firstItem = data.cart_items?.[0] || {};
-      quantity = firstItem.quantity ?? 1;
-      productName = firstItem.product?.name || "منتج";
+      quantity = toNumber(
+        firstItem?.quantity ||
+          data.quantity ||
+          1
+      );
 
-      priceRaw =
-        firstItem.price ??
-        data.total_cost ??
-        data.cost ??
-        0;
+      productPrice = toNumber(
+        firstItem?.price ||
+          data.subtotal ||
+          data.total_price ||
+          0
+      );
 
-      shippingRaw =
-        data.shipping_cost ??
-        data.shipping_fee ??
-        data.shipping_price ??
-        data.delivery_cost ??
-        data.shipping ??
-        0;
+      shipping = toNumber(
+        data.shipping ||
+          data.shipping_price ||
+          0
+      );
 
-      detailedAddress =
+      total = toNumber(
+        data.total ||
+          data.total_price ||
+          productPrice + shipping
+      );
+
+      address = safeText(
         data.address ||
-        data.full_address ||
-        data.shipping_address ||
-        data.city ||
-        "غير متوفر";
+          data.city ||
+          data.region ||
+          "Address not available"
+      );
 
-      nationalAddressRaw =
+      nationalAddress = safeText(
         data.national_address ||
-        data.short_address ||
-        "";
+          "National Address not available"
+      );
     }
 
-    const e164Phone = normalizePhone(customerPhone, country);
-    const digitsPhone = e164Phone.replace(/^\+/, "");
-
-    if (!digitsPhone || digitsPhone.length < 9) {
+    if (!phone) {
       return res.status(400).json({
-        error: "invalid_phone",
-        customerPhone,
+        success: false,
+        error: "Phone number not found in payload"
       });
     }
 
-    const priceNum = toNumber(priceRaw);
-    const shippingNum = toNumber(shippingRaw);
-    const totalNum = priceNum + shippingNum;
+    // =========================
+    // Template + Language
+    // =========================
+    const templateName = "confirmation_order";
+    const templateLanguage = "en";
 
-    const currency = cfg.currency;
-    const priceText = priceNum ? `${priceNum} ${currency}` : "غير محدد";
-    const shippingText = shippingNum ? `${shippingNum} ${currency}` : "مجاني";
-    const totalText = `${totalNum} ${currency}`;
+    // =========================
+    // Format values
+    // =========================
+    const shippingText = shipping > 0 ? `${shipping} SAR` : "Free";
+    const totalText = `${total || productPrice + shipping} SAR`;
+    const productPriceText = `${productPrice} SAR`;
+    const orderCode = `${orderId} (${storeTag})`;
 
-    const nationalAddress =
-      safeText(nationalAddressRaw) ||
-      "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
+    // =========================
+    // API Config
+    // =========================
+    const API_BASE_URL = process.env.API_BASE_URL || "https://joud.chat/api/v1";
+    const VENDOR_UID = process.env.VENDOR_UID;
+    const API_TOKEN = process.env.API_TOKEN;
 
-    const API_BASE_URL = process.env.SAAS_API_BASE_URL;
-    const VENDOR_UID = process.env.SAAS_VENDOR_UID;
-    const API_TOKEN = process.env.SAAS_API_TOKEN;
-
-    if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
+    if (!VENDOR_UID || !API_TOKEN) {
       return res.status(500).json({
-        error: "missing_env",
+        success: false,
+        error: "Missing VENDOR_UID or API_TOKEN in environment variables"
       });
     }
-
-    const payload = {
-      phone_number: digitsPhone,
-      template_name: "t_utillty",
-      template_language: "ar",
-
-      field_1: safeText(customerName),
-      field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
-      field_3: safeText(productName),
-      field_4: safeText(quantity),
-      field_5: safeText(priceText),
-      field_6: safeText(shippingText),
-      field_7: safeText(totalText),
-      field_8: safeText(detailedAddress),
-      field_9: safeText(nationalAddress),
-
-      contact: {
-        first_name: safeText(customerName),
-        phone_number: digitsPhone,
-        country: "auto",
-      },
-    };
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
-    const saasRes = await fetch(endpoint, {
+    // =========================
+    // Payload
+    // =========================
+    const payload = {
+      phone_number: phone,
+      template_name: templateName,
+      template_language: templateLanguage,
+      field_1: customerName,
+      field_2: orderCode,
+      field_3: productName,
+      field_4: String(quantity),
+      field_5: productPriceText,
+      field_6: shippingText,
+      field_7: totalText,
+      field_8: address,
+      field_9: nationalAddress,
+      contact: {
+        first_name: customerName,
+        phone_number: phone,
+        country: "auto"
+      }
+    };
+
+    console.log("🏪 Store:", storeTag, "| isShopifyOrder:", isShopifyOrder);
+    console.log("🧩 Template:", templateName, "| Lang:", templateLanguage);
+    console.log("🚀 Endpoint:", endpoint);
+    console.log("🚀 Payload:", payload);
+
+    // =========================
+    // Send Request
+    // =========================
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${API_TOKEN}`,
+        Authorization: `Bearer ${API_TOKEN}`
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     });
 
-    const responseData = await saasRes.json().catch(() => null);
+    const resultText = await response.text();
 
-    if (!saasRes.ok || responseData?.result === "failed") {
-      return res.status(500).json({
-        error: "saas_error",
-        responseData,
-      });
+    let result;
+    try {
+      result = JSON.parse(resultText);
+    } catch {
+      result = { raw: resultText };
     }
 
+    console.log("📩 API Response:", result);
+
     return res.status(200).json({
-      status: "sent",
-      storeTag,
-      data: responseData,
+      success: true,
+      template_name: templateName,
+      template_language: templateLanguage,
+      store: storeTag,
+      phone,
+      result
     });
-  } catch (err) {
+  } catch (error) {
+    console.error("❌ Webhook Error:", error);
     return res.status(500).json({
-      error: "internal_error",
-      details: err?.message || String(err),
+      success: false,
+      error: error.message || "Internal Server Error"
     });
   }
 };
