@@ -31,7 +31,7 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // Store Tag (WHATWG URL)
+    // Store Tag
     // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
@@ -43,30 +43,30 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     // =========================
-    // Store Config (UPDATED)
+    // Store Config
     // =========================
     const storeConfig = {
       EQ: {
-        template: "confirmation_order",
-        lang: "en",
+        template: "t_utillty",
+        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       BZ: {
-        template: "confirmation_order",
-        lang: "en",
+        template: "t_utillty",
+        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       GZ: {
-        template: "confirmation_order",
-        lang: "en",
+        template: "t_utillty",
+        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       SH: {
-        template: "confirmation_order",
-        lang: "en",
+        template: "t_utillty",
+        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
