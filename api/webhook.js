@@ -1,9 +1,6 @@
 // api/webhook.js
 
 module.exports = async function webhook(req, res) {
-  // =========================
-  // Health Check
-  // =========================
   if (req.method === "GET") {
     return res.status(200).send("Webhook Running ✅");
   }
@@ -15,9 +12,6 @@ module.exports = async function webhook(req, res) {
   try {
     const data = req.body || {};
 
-    // =========================
-    // Helpers
-    // =========================
     const safeText = (t) => {
       if (!t && t !== 0) return "";
       return String(t)
@@ -30,9 +24,6 @@ module.exports = async function webhook(req, res) {
     const toNumber = (v) =>
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
-    // =========================
-    // Store Tag (WHATWG URL)
-    // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
       u.searchParams.get("storeTag") ||
@@ -42,41 +33,15 @@ module.exports = async function webhook(req, res) {
 
     const storeTag = String(storeTagRaw).toUpperCase();
 
-    // =========================
-    // Store Config
-    // =========================
     const storeConfig = {
-      EQ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      BZ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      GZ: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      SH: {
-        template: "t_utillty",
-        lang: "ar",
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
+      EQ: { template: "t_utillty", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { template: "t_utillty", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { template: "t_utillty", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { template: "t_utillty", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
 
-    // =========================
-    // Detect Shopify Order
-    // =========================
     const looksLikeShopify =
       (typeof data.name === "string" && data.name.startsWith("#")) ||
       !!data.shipping_address ||
@@ -85,9 +50,6 @@ module.exports = async function webhook(req, res) {
 
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
-    // =========================
-    // Normalize Phone (E.164)
-    // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
       let raw = String(phone).replace(/[^0-9]/g, "");
@@ -106,7 +68,6 @@ module.exports = async function webhook(req, res) {
       if (raw.startsWith("07") && raw.length === 9) return `+967${raw.substring(1)}`;
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
-      // السعودية / الإمارات
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
@@ -115,9 +76,6 @@ module.exports = async function webhook(req, res) {
       return raw ? `+${raw}` : "";
     }
 
-    // =========================
-    // Data Mapping
-    // =========================
     let customerName, customerPhone, orderId, country;
     let productName, quantity = 1;
     let priceRaw = 0, shippingRaw = 0;
@@ -131,25 +89,10 @@ module.exports = async function webhook(req, res) {
       const firstItem = items[0] || {};
 
       const fullName = safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`);
-      customerName =
-        fullName ||
-        safeText(shipping.name) ||
-        safeText(billing.name) ||
-        "عميلنا العزيز";
-
-      customerPhone =
-        shipping.phone ||
-        data.phone ||
-        data.customer?.phone ||
-        "";
-
+      customerName = fullName || safeText(shipping.name) || safeText(billing.name) || "عميلنا العزيز";
+      customerPhone = shipping.phone || data.phone || data.customer?.phone || "";
       orderId = data.name || data.order_number || data.id || "";
-
-      country =
-        shipping.country_code ||
-        shipping.country ||
-        cfg.defaultCountry;
-
+      country = shipping.country_code || shipping.country || cfg.defaultCountry;
       quantity = firstItem.quantity ?? 1;
 
       productName =
@@ -160,10 +103,7 @@ module.exports = async function webhook(req, res) {
       priceRaw = firstItem.price ?? data.total_price ?? 0;
 
       const shippingLine = data.shipping_lines?.[0] || {};
-      shippingRaw =
-        shippingLine.price ??
-        data.total_shipping_price_set?.shop_money?.amount ??
-        0;
+      shippingRaw = shippingLine.price ?? data.total_shipping_price_set?.shop_money?.amount ?? 0;
 
       detailedAddress = [
         shipping.address1,
@@ -171,42 +111,19 @@ module.exports = async function webhook(req, res) {
         shipping.city,
         shipping.province,
         shipping.zip,
-      ].filter(Boolean).join(" - ");
+      ].filter(Boolean).join(" - ") || "غير متوفر";
 
     } else {
-      customerName =
-        data.full_name ||
-        data.name ||
-        data.customer_name ||
-        "عميلنا العزيز";
-
-      customerPhone =
-        data.phone ||
-        data.phone_alt ||
-        data.customer_phone ||
-        "";
-
-      orderId =
-        data.short_id ||
-        data.order_id ||
-        data.id ||
-        "";
-
-      country =
-        data.country ||
-        data.shipping_country ||
-        cfg.defaultCountry;
+      customerName = data.full_name || data.name || data.customer_name || "عميلنا العزيز";
+      customerPhone = data.phone || data.phone_alt || data.customer_phone || "";
+      orderId = data.short_id || data.order_id || data.id || "";
+      country = data.country || data.shipping_country || cfg.defaultCountry;
 
       const firstItem = data.cart_items?.[0] || {};
       quantity = firstItem.quantity ?? 1;
       productName = firstItem.product?.name || "منتج";
 
-      priceRaw =
-        firstItem.price ??
-        data.total_cost ??
-        data.cost ??
-        0;
-
+      priceRaw = firstItem.price ?? data.total_cost ?? data.cost ?? 0;
       shippingRaw =
         data.shipping_cost ??
         data.shipping_fee ??
@@ -222,16 +139,14 @@ module.exports = async function webhook(req, res) {
         data.city ||
         "غير متوفر";
 
-      nationalAddressRaw =
-        data.national_address ||
-        data.short_address ||
-        "";
+      nationalAddressRaw = data.national_address || data.short_address || "";
     }
 
     const e164Phone = normalizePhone(customerPhone, country);
     const digitsPhone = e164Phone.replace(/^\+/, "");
 
     if (!digitsPhone || digitsPhone.length < 9) {
+      console.log("INVALID PHONE:", { customerPhone, e164Phone, digitsPhone });
       return res.status(400).json({ error: "invalid_phone", customerPhone });
     }
 
@@ -248,26 +163,24 @@ module.exports = async function webhook(req, res) {
       safeText(nationalAddressRaw) ||
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
-    // =========================
-    // ENV
-    // =========================
     const API_BASE_URL = process.env.SAAS_API_BASE_URL;
     const VENDOR_UID = process.env.SAAS_VENDOR_UID;
     const API_TOKEN = process.env.SAAS_API_TOKEN;
 
     if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
-      return res.status(500).json({
-        error: "missing_env",
+      console.log("MISSING ENV:", {
+        API_BASE_URL: !!API_BASE_URL,
+        VENDOR_UID: !!VENDOR_UID,
+        API_TOKEN: !!API_TOKEN,
       });
+
+      return res.status(500).json({ error: "missing_env" });
     }
 
-    // =========================
-    // Payload
-    // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: cfg.template,       // ✅ t_utillty
-      template_language: cfg.lang,       // ✅ ar
+      template_name: cfg.template,
+      template_language: cfg.lang,
 
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
@@ -288,6 +201,15 @@ module.exports = async function webhook(req, res) {
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
+    console.log("WEBHOOK DEBUG:", {
+      storeTag,
+      template: cfg.template,
+      language: cfg.lang,
+      phone: digitsPhone,
+      endpoint,
+      payload,
+    });
+
     const saasRes = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -297,15 +219,41 @@ module.exports = async function webhook(req, res) {
       body: JSON.stringify(payload),
     });
 
-    const responseData = await saasRes.json().catch(() => null);
+    const responseText = await saasRes.text();
 
-    if (!saasRes.ok || responseData?.result === "failed") {
-      return res.status(500).json({ error: "saas_error", responseData });
+    let responseData = null;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = responseText;
     }
 
-    return res.status(200).json({ status: "sent", storeTag, data: responseData });
+    console.log("SAAS RESPONSE:", {
+      status: saasRes.status,
+      ok: saasRes.ok,
+      responseData,
+    });
+
+    if (!saasRes.ok || responseData?.result === "failed") {
+      return res.status(500).json({
+        error: "saas_error",
+        status: saasRes.status,
+        responseData,
+      });
+    }
+
+    return res.status(200).json({
+      status: "sent",
+      storeTag,
+      template: cfg.template,
+      language: cfg.lang,
+      phone: digitsPhone,
+      data: responseData,
+    });
 
   } catch (err) {
+    console.error("WEBHOOK ERROR:", err);
+
     return res.status(500).json({
       error: "internal_error",
       details: err?.message || String(err),
